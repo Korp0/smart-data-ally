@@ -129,27 +129,77 @@ async def query_data(query: QueryRequest):
 
     logger.info(f"Received query for dataset: {dataset_name} with query: {user_query}")
 
-    # Check if the dataset exists
     if dataset_name not in datasets:
         logger.error(f"Dataset '{dataset_name}' not found.")
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     data = datasets[dataset_name]
 
-    # Generate the pandas query using OpenAI
     pandas_query = get_pandas_query(user_query, data)
-
-    # Execute the pandas query
     result_dict = execute_pandas_query(pandas_query, data)
-
-    # Generate humanized response even if the query failed
     humanized_text = get_humanized_response(user_query, pandas_query, result_dict)
+
+    # Suggest a chart type and data points for visualization
+    chart_suggestion = suggest_chart_type(user_query, pandas_query, result_dict)
 
     return {
         "query": pandas_query if pandas_query else "There was an issue generating the query.",
         "result": result_dict,
-        "humanized_response": humanized_text
+        "humanized_response": humanized_text,
+        "visualization": {
+            "chart_type": chart_suggestion.get("chart_type"),
+            "data_points": chart_suggestion.get("data_points")
+        }
     }
+
+
+def suggest_chart_type(user_query: str, pandas_query: str, result_dict: Dict) -> Dict:
+    try:
+        openai.api_key = os.getenv('OPENAI_API_KEY')
+        if not openai.api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API key is missing.")
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system",
+                 "content": "You are a data assistant that determines if a result can be visualized and suggests "
+                            "a chart type and data points for visualization. Respond with a JSON object containing "
+                            "'chart_type' and 'data_points', or {'chart_type': None, 'data_points': None} if no chart "
+                            "is needed. chart_type will give result in one word as for example 'bar' or 'line' and similar."},
+                {"role": "user",
+                 "content": f"The user asked: {user_query}\n\nThe pandas query used: {pandas_query}\n\n"
+                            f"The raw result from the query: {result_dict}\n\nSuggest a visualization."},
+            ]
+        )
+        suggestion = response['choices'][0]['message']['content'].strip()
+        return eval(suggestion)  # The response should be a JSON-like string.
+    except Exception as e:
+        logger.error(f"Error suggesting chart type: {str(e)}")
+        return {"chart_type": None, "data_points": None}
+
+
+@app.get("/preview/{dataset_name}")
+async def preview_dataset(dataset_name: str):
+    """
+    Endpoint to preview a dataset.
+    """
+    # Check if the dataset exists
+    if dataset_name not in datasets:
+        logger.error(f"Dataset '{dataset_name}' not found for preview.")
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    data = datasets[dataset_name]
+
+    try:
+        # Get a preview of the dataset (e.g., the first 5 rows)
+        preview = data.head(5).to_dict(orient="records")
+        return {"dataset_name": dataset_name, "preview": preview}
+    except Exception as e:
+        logger.error(f"Error generating preview for dataset '{dataset_name}': {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="An error occurred while generating the dataset preview."
+        )
 
 
 if __name__ == "__main__":
