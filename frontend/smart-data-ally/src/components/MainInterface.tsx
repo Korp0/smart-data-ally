@@ -13,6 +13,7 @@ import {
   PointElement,
 } from "chart.js";
 import { Bar, Line } from "react-chartjs-2";
+import DatasetUploader from "./DatasetUploader";
 
 // Register Chart.js components
 ChartJS.register(
@@ -83,11 +84,42 @@ const MainInterface: React.FC<MainInterface> = () => {
   };
 
   const getDatasets = async (): Promise<void> => {
+    try {
+      const response = await axios.get("http://localhost:8000/datasets");
+      const datasets = response.data.datasets;
+
+      setAvailableDatasets(datasets);
+
+      if (datasets.length > 0) {
+        setSelectedDataset(datasets[0]);
+        await getColumnSummary(datasets[0]);
+      }
+    } catch (err) {
+      console.error("Error fetching datasets:", err);
+    }
+  };
+
+  const getColumnSummary = async (dataset: string): Promise<void> => {
     axios
-      .get("http://localhost:8000/datasets")
+      .get("http://localhost:8000/preview/" + dataset)
       .then((response) => {
-        setAvailableDatasets(response.data.datasets);
-        setSelectedDataset(response.data.datasets[0]);
+        const newMessage: ChatMessage = {
+          from: Messenger.CHAT,
+          content: response.data.columns_summary,
+          time: getCurrentTime(),
+        };
+
+        setChatResponses((prevResponses) => {
+          const exists = prevResponses.some(
+            (msg) =>
+              msg.content === newMessage.content && msg.time === newMessage.time
+          );
+
+          if (!exists) {
+            return [...prevResponses, newMessage];
+          }
+          return prevResponses;
+        });
       })
       .catch((err) => {
         console.log("Error fetching datasets: ", err);
@@ -139,10 +171,18 @@ const MainInterface: React.FC<MainInterface> = () => {
             time: getCurrentTime(),
           };
 
-          setChatResponses((prevResponses) => [
-            ...prevResponses,
-            newChatResponse,
-          ]);
+          setChatResponses((prevResponses) => {
+            const exists = prevResponses.some(
+              (msg) =>
+                msg.content === newChatResponse.content &&
+                msg.time === newChatResponse.time
+            );
+
+            if (!exists) {
+              return [...prevResponses, newChatResponse];
+            }
+            return prevResponses;
+          });
         }
       })
       .catch((err) => {
@@ -168,6 +208,16 @@ const MainInterface: React.FC<MainInterface> = () => {
     e: React.ChangeEvent<HTMLSelectElement>
   ): void => {
     setSelectedDataset(e.target.value);
+
+    const newChatMessage: ChatMessage = {
+      from: Messenger.CHAT,
+      content: "Switched dataset to: " + e.target.value.toUpperCase(),
+      time: getCurrentTime(),
+    };
+
+    setChatResponses((prevResponses) => [...prevResponses, newChatMessage]);
+
+    getColumnSummary(e.target.value);
   };
 
   const renderVisualization = (): JSX.Element | null => {
@@ -239,19 +289,22 @@ const MainInterface: React.FC<MainInterface> = () => {
 
   return (
     <div className="MainInterface">
-      <div className="dropdown">
-        <h3>Dataset</h3>
-        <select
-          name="datasets"
-          className="datasets"
-          onChange={handleSelectChange}
-        >
-          {availableDatasets.map((dataset) => (
-            <option value={dataset} key={dataset}>
-              {dataset.toUpperCase()}
-            </option>
-          ))}
-        </select>
+      <div className="datasetWrapper">
+        <div className="dropdown">
+          <h3>Dataset</h3>
+          <select
+            name="datasets"
+            className="datasets"
+            onChange={handleSelectChange}
+          >
+            {availableDatasets.map((dataset) => (
+              <option value={dataset} key={dataset}>
+                {dataset.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </div>
+        <DatasetUploader onUpload={getDatasets} />
       </div>
       <div className="interface">
         <div className="outputBox">
@@ -304,7 +357,7 @@ const MainInterface: React.FC<MainInterface> = () => {
                 color: "white",
               }}
             >
-              Send
+              SEND
             </button>
           )}
         </div>

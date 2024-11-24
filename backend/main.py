@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import openai
@@ -26,6 +26,7 @@ app.add_middleware(
 # Datasets dictionary - In a real app, you may want to dynamically load datasets
 datasets = {
     "csgo": pd.read_csv("./datasets/csgo.csv"),
+    "twitch": pd.read_csv("./datasets/twitch.csv"),
 }
 
 
@@ -181,9 +182,6 @@ def suggest_chart_type(user_query: str, pandas_query: str, result_dict: Dict) ->
 
 @app.get("/preview/{dataset_name}")
 async def preview_dataset(dataset_name: str):
-    """
-    Endpoint to preview a dataset.
-    """
     # Check if the dataset exists
     if dataset_name not in datasets:
         logger.error(f"Dataset '{dataset_name}' not found for preview.")
@@ -192,14 +190,51 @@ async def preview_dataset(dataset_name: str):
     data = datasets[dataset_name]
 
     try:
-        # Get a preview of the dataset (e.g., the first 5 rows)
-        preview = data.head(5).to_dict(orient="records")
-        return {"dataset_name": dataset_name, "preview": preview}
-    except Exception as e:
-        logger.error(f"Error generating preview for dataset '{dataset_name}': {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="An error occurred while generating the dataset preview."
+        # Extract column names and data types
+        column_info = data.dtypes.apply(lambda dtype: str(dtype)).to_dict()
+
+        # Generate a human-readable description of columns
+        column_descriptions = [
+            f"'{col}' (type: {dtype})" for col, dtype in column_info.items()
+        ]
+        summary = (
+                f"The dataset '{dataset_name}' contains the following columns:\n"
+                + "\n".join(column_descriptions)
+                + "\n\nYou can query these columns for analysis or visualization."
         )
+
+        return {
+            "dataset_name": dataset_name,
+            "columns_summary": summary,
+            "columns": list(column_info.keys()),
+        }
+
+    except Exception as e:
+        logger.error(f"Error summarizing dataset '{dataset_name}': {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while summarizing the dataset.",
+        )
+
+
+@app.post("/upload-dataset")
+async def upload_dataset(file: UploadFile = File(...)):
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+
+    try:
+        data = pd.read_csv(file.file)
+
+        dataset_name = file.filename.rsplit(".", 1)[0]
+        if dataset_name in datasets:
+            raise HTTPException(status_code=400, detail="A dataset with this name already exists.")
+
+        datasets[dataset_name] = data
+
+        return {"message": f"Dataset '{dataset_name}' uploaded successfully.", "dataset_name": dataset_name}
+    except Exception as e:
+        logger.error(f"Error uploading dataset: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred while processing the dataset.")
 
 
 if __name__ == "__main__":
