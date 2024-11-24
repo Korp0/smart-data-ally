@@ -15,7 +15,6 @@ import {
 import { Bar, Line } from "react-chartjs-2";
 import DatasetUploader from "./DatasetUploader";
 
-// Register Chart.js components
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -34,11 +33,11 @@ interface Dictionary<T> {
 }
 
 interface Visualization {
-  chart_type: string | null; // e.g., "bar", "line", etc.
+  chart_type: string | null;
   data_points:
     | {
-        name: string; // X-axis labels
-        value: number; // Y-axis values
+        name: string;
+        value: number;
       }[]
     | null;
 }
